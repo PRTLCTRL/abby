@@ -145,6 +145,38 @@ wss.on('connection', (twilioWs) => {
 
           case 'session.updated':
             console.log('✏️  OpenAI session updated');
+
+            // Fetch recent baby activity context from Huckleberry
+            try {
+              console.log('📊 Fetching recent activity context...');
+              const contextResult = await handleFunctionCall(
+                'get_recent_activity',
+                { hours: 24 },
+                phoneNumber,
+                saveParentUpdate
+              );
+
+              if (contextResult.success && contextResult.message) {
+                // Inject context into the conversation as a system message
+                openaiWs.send(JSON.stringify({
+                  type: 'conversation.item.create',
+                  item: {
+                    type: 'message',
+                    role: 'system',
+                    content: [
+                      {
+                        type: 'input_text',
+                        text: `Context about the baby's recent activity:\n${contextResult.message}\n\nUse this information to provide personalized responses and insights during the conversation.`
+                      }
+                    ]
+                  }
+                }));
+                console.log('✅ Context loaded into conversation');
+              }
+            } catch (error) {
+              console.warn('⚠️  Failed to load recent activity context:', error);
+              // Continue without context - not critical
+            }
             break;
 
           case 'response.audio.delta':

@@ -193,6 +193,20 @@ async def list_tools() -> list[Tool]:
                     }
                 }
             }
+        ),
+        Tool(
+            name="get_recent_activity",
+            description=f"Get recent activity summary for {child_name} from the last 24 hours (sleep, feeding, diapers). Call this at the start of conversations to get context.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "hours": {
+                        "type": "number",
+                        "description": "Number of hours to look back (default: 24)",
+                        "default": 24
+                    }
+                }
+            }
         )
     ]
 
@@ -310,6 +324,100 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
 
             return [TextContent(type="text", text=result)]
 
+        elif name == "get_recent_activity":
+            hours = arguments.get("hours", 24)
+
+            logger.info(f"Fetching recent activity for last {hours} hours")
+
+            import time
+            from datetime import datetime, timedelta
+
+            # Calculate timestamps
+            now = datetime.now()
+            start_time = now - timedelta(hours=hours)
+            start_timestamp = int(start_time.timestamp())
+            end_timestamp = int(now.timestamp())
+
+            # Fetch data from Huckleberry API
+            try:
+                sleep_data = huckleberry_api.get_sleep_intervals(
+                    child_uid=child_uid,
+                    start_timestamp=start_timestamp,
+                    end_timestamp=end_timestamp
+                )
+
+                feed_data = huckleberry_api.get_feed_intervals(
+                    child_uid=child_uid,
+                    start_timestamp=start_timestamp,
+                    end_timestamp=end_timestamp
+                )
+
+                diaper_data = huckleberry_api.get_diaper_intervals(
+                    child_uid=child_uid,
+                    start_timestamp=start_timestamp,
+                    end_timestamp=end_timestamp
+                )
+
+                # Build summary
+                summary_parts = [f"Recent activity for {child_name} (last {hours} hours):"]
+
+                # Sleep summary
+                if sleep_data:
+                    total_sleep_mins = sum(s.get('duration', 0) for s in sleep_data) // 60
+                    last_sleep = sleep_data[-1] if sleep_data else None
+                    if last_sleep:
+                        last_sleep_time = datetime.fromtimestamp(last_sleep['start'])
+                        time_since_sleep = (now - last_sleep_time).total_seconds() / 3600
+                        last_sleep_duration = last_sleep.get('duration', 0) // 60
+                        summary_parts.append(
+                            f"\n🛌 Sleep: {len(sleep_data)} session(s), total {total_sleep_mins} minutes. "
+                            f"Last nap was {time_since_sleep:.1f} hours ago ({last_sleep_duration} min)."
+                        )
+                    else:
+                        summary_parts.append(f"\n🛌 Sleep: {len(sleep_data)} session(s), total {total_sleep_mins} minutes.")
+                else:
+                    summary_parts.append("\n🛌 Sleep: No sleep recorded recently.")
+
+                # Feeding summary
+                if feed_data:
+                    last_feed = feed_data[-1] if feed_data else None
+                    if last_feed:
+                        last_feed_time = datetime.fromtimestamp(last_feed['start'])
+                        time_since_feed = (now - last_feed_time).total_seconds() / 3600
+                        summary_parts.append(
+                            f"\n🍼 Feeding: {len(feed_data)} session(s). Last fed {time_since_feed:.1f} hours ago."
+                        )
+                    else:
+                        summary_parts.append(f"\n🍼 Feeding: {len(feed_data)} session(s).")
+                else:
+                    summary_parts.append("\n🍼 Feeding: No feedings recorded recently.")
+
+                # Diaper summary
+                if diaper_data:
+                    pee_count = sum(1 for d in diaper_data if d.get('mode') in ['pee', 'both'])
+                    poo_count = sum(1 for d in diaper_data if d.get('mode') in ['poo', 'both'])
+                    last_diaper = diaper_data[-1] if diaper_data else None
+                    if last_diaper:
+                        last_diaper_time = datetime.fromtimestamp(last_diaper['start'])
+                        time_since_diaper = (now - last_diaper_time).total_seconds() / 3600
+                        summary_parts.append(
+                            f"\n🧷 Diapers: {len(diaper_data)} total ({pee_count} wet, {poo_count} dirty). "
+                            f"Last change {time_since_diaper:.1f} hours ago."
+                        )
+                    else:
+                        summary_parts.append(f"\n🧷 Diapers: {len(diaper_data)} total ({pee_count} wet, {poo_count} dirty).")
+                else:
+                    summary_parts.append("\n🧷 Diapers: No diaper changes recorded recently.")
+
+                result = "".join(summary_parts)
+                logger.info("✅ Activity summary generated")
+
+                return [TextContent(type="text", text=result)]
+
+            except Exception as e:
+                logger.error(f"Error fetching activity data: {e}")
+                return [TextContent(type="text", text=f"Unable to fetch recent activity: {str(e)}")]
+
         else:
             raise ValueError(f"Unknown tool: {name}")
 
@@ -321,7 +429,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
 async def main():
     """Run the MCP server."""
     logger.info("🍓 Starting Huckleberry MCP stdio server...")
-    logger.info(f"   Tools: log_sleep, log_feeding, log_diaper, log_activity, log_growth")
+    logger.info(f"   Tools: log_sleep, log_feeding, log_diaper, log_activity, log_growth, get_recent_activity")
 
     async with stdio_server() as (read_stream, write_stream):
         await server.run(

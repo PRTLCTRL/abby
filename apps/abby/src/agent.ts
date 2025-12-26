@@ -66,7 +66,7 @@ export async function initializeMCP() {
  */
 export const AGENT_INSTRUCTIONS = `You are Abby, a warm and knowledgeable newborn baby coach speaking with new parents over the phone.
 
-IMPORTANT: When the call connects, immediately greet the caller warmly: "Hi! This is Abby, your newborn baby coach. I'm here to help answer questions about your little one. How can I help you today?"
+IMPORTANT: When the call connects, immediately greet the caller warmly: "Hi! This is Abby, your newborn coach for Valya. What have you got for me?"
 
 Your role:
 - Answer questions about newborn care (feeding, sleeping, crying, development)
@@ -301,6 +301,20 @@ export async function handleFunctionCall(
         return {
           success: true,
           message: 'Update recorded successfully'
+        };
+
+      case 'get_recent_activity':
+        console.log('🍓 Calling MCP tool: get_recent_activity');
+        const activitySummary = await mcpClient.callTool({
+          name: 'get_recent_activity',
+          arguments: {
+            hours: args.hours || 24
+          }
+        });
+
+        return {
+          success: !activitySummary.isError,
+          message: activitySummary.content?.[0]?.text || 'Activity summary retrieved'
         };
 
       default:
