@@ -177,6 +177,12 @@ wss.on('connection', (twilioWs) => {
               console.warn('⚠️  Failed to load recent activity context:', error);
               // Continue without context - not critical
             }
+
+            // Request initial greeting from Abby (now that context is loaded)
+            openaiWs.send(JSON.stringify({
+              type: 'response.create'
+            }));
+            console.log('🎤 Requested initial greeting');
             break;
 
           case 'response.audio.delta':
