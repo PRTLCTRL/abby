@@ -228,11 +228,11 @@ wss.on('connection', (twilioWs) => {
             break;
 
           case 'response.audio_transcript.delta':
-            process.stdout.write(event.delta);
+            // Skip streaming deltas to avoid duplicate logs
             break;
 
           case 'response.audio_transcript.done':
-            console.log(`\n🤖 ABBY: "${event.transcript}"`);
+            console.log(`🤖 ABBY: "${event.transcript}"`);
             break;
 
           case 'input_audio_buffer.speech_started':

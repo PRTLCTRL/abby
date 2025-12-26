@@ -19,6 +19,7 @@
 | [ABBY-09](ABBY-09-SMS-Interface.md) | SMS/Text Interface | 🟡 Medium | Medium | 📋 Planned |
 | [ABBY-10](ABBY-10-Web-Dashboard.md) | Web Dashboard | 🔴 Large | Low | 📋 Planned |
 | [ABBY-11](ABBY-11-Voice-Biometrics.md) | Voice Biometrics | 🔴 Large | Low | 📋 Planned |
+| [ABBY-12](ABBY-12-Last-Conversation-Context.md) | Last Conversation Context | 🟡 Medium | High | 📋 Planned |
 
 ---
 
@@ -29,6 +30,7 @@
 - **ABBY-02**: Proactive Insights - Notice anomalies and trends
 - **ABBY-04**: Predictive Modeling - Predict next feed, nap, bedtime
 - **ABBY-07**: Conversation Memory - Remember past interactions
+- **ABBY-12**: Last Conversation Context - Remember the previous call (quick win!)
 
 ### 📊 Monitoring & Visibility
 - **ABBY-03**: Historical Trends - Compare week/month over time
