@@ -1,0 +1,41 @@
+{
+  "name": "abby-baby-coach",
+  "version": "1.0.0",
+  "description": "Abby - AI Newborn Baby Coach via Phone (Twilio + OpenAI Realtime API)",
+  "type": "module",
+  "main": "dist/server.js",
+  "scripts": {
+    "start": "tsx src/server.ts",
+    "dev": "tsx watch src/server.ts",
+    "test": "tsx src/test-mcp.ts",
+    "build": "tsc",
+    "ngrok": "ngrok http 3002",
+    "start:with-ngrok": "concurrently --names \"ABBY,NGROK\" -c \"blue,yellow\" \"npm start\" \"npm run ngrok\""
+  },
+  "keywords": [
+    "twilio",
+    "openai",
+    "realtime",
+    "baby",
+    "newborn",
+    "coach"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.25.1",
+    "dotenv": "^16.0.3",
+    "express": "^4.18.2",
+    "node-fetch": "^3.3.2",
+    "twilio": "^4.19.0",
+    "ws": "^8.14.2"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^25.0.3",
+    "@types/ws": "^8.18.1",
+    "concurrently": "^8.2.2",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  }
+}

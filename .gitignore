@@ -1,0 +1,19 @@
+node_modules
+dist
+logs/*
+data/*
+!.gitkeep
+.env
+dev.vars
+npm-debug.log*
+*.log
+.DS_Store
+archived/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
