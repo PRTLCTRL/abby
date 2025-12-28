@@ -200,6 +200,120 @@ app.get('/health', (req: Request, res: Response) => {
 });
 
 /**
+ * Dashboard API: Get all conversations for a phone number
+ */
+app.get('/api/conversations/:phoneNumber', (req: Request, res: Response) => {
+  try {
+    const { phoneNumber } = req.params;
+    const sanitizedNumber = phoneNumber.replace(/[^0-9]/g, '');
+    const conversationFile = path.join(__dirname, '..', 'data', 'conversations', `${sanitizedNumber}.jsonl`);
+
+    if (!fs.existsSync(conversationFile)) {
+      return res.json({ success: true, data: [] });
+    }
+
+    const lines = fs.readFileSync(conversationFile, 'utf-8').trim().split('\n');
+    const conversations = lines
+      .filter(line => line.trim())
+      .map(line => JSON.parse(line))
+      .reverse(); // Most recent first
+
+    res.json({ success: true, data: conversations });
+  } catch (error) {
+    console.error('Error fetching conversations:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch conversations' });
+  }
+});
+
+/**
+ * Dashboard API: Get parent updates/logs
+ */
+app.get('/api/logs/:phoneNumber', (req: Request, res: Response) => {
+  try {
+    const { phoneNumber } = req.params;
+    const sanitizedNumber = phoneNumber.replace(/[^0-9]/g, '');
+    const logFile = path.join(__dirname, '..', 'data', 'logs', `${sanitizedNumber}.jsonl`);
+
+    if (!fs.existsSync(logFile)) {
+      return res.json({ success: true, data: [] });
+    }
+
+    const lines = fs.readFileSync(logFile, 'utf-8').trim().split('\n');
+    const logs = lines
+      .filter(line => line.trim())
+      .map(line => JSON.parse(line))
+      .reverse(); // Most recent first
+
+    res.json({ success: true, data: logs });
+  } catch (error) {
+    console.error('Error fetching logs:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch logs' });
+  }
+});
+
+/**
+ * Dashboard API: Get conversation statistics
+ */
+app.get('/api/stats/:phoneNumber', (req: Request, res: Response) => {
+  try {
+    const { phoneNumber } = req.params;
+    const sanitizedNumber = phoneNumber.replace(/[^0-9]/g, '');
+    const conversationFile = path.join(__dirname, '..', 'data', 'conversations', `${sanitizedNumber}.jsonl`);
+
+    if (!fs.existsSync(conversationFile)) {
+      return res.json({
+        success: true,
+        data: {
+          total_conversations: 0,
+          total_duration: 0,
+          topics: {},
+          sentiments: {},
+          recent_concerns: []
+        }
+      });
+    }
+
+    const lines = fs.readFileSync(conversationFile, 'utf-8').trim().split('\n');
+    const conversations = lines.filter(line => line.trim()).map(line => JSON.parse(line));
+
+    const stats = {
+      total_conversations: conversations.length,
+      total_duration: conversations.reduce((sum, c) => sum + (c.duration_seconds || 0), 0),
+      topics: {} as Record<string, number>,
+      sentiments: {} as Record<string, number>,
+      recent_concerns: [] as string[]
+    };
+
+    conversations.forEach(convo => {
+      // Count topics
+      (convo.key_topics || []).forEach((topic: string) => {
+        stats.topics[topic] = (stats.topics[topic] || 0) + 1;
+      });
+
+      // Count sentiments
+      if (convo.sentiment) {
+        stats.sentiments[convo.sentiment] = (stats.sentiments[convo.sentiment] || 0) + 1;
+      }
+
+      // Collect recent concerns
+      (convo.concerns_raised || []).forEach((concern: string) => {
+        if (!stats.recent_concerns.includes(concern)) {
+          stats.recent_concerns.push(concern);
+        }
+      });
+    });
+
+    // Limit recent concerns to last 10
+    stats.recent_concerns = stats.recent_concerns.slice(0, 10);
+
+    res.json({ success: true, data: stats });
+  } catch (error) {
+    console.error('Error fetching stats:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch statistics' });
+  }
+});
+
+/**
  * Create HTTP server and WebSocket server
  */
 const server = app.listen(PORT, async () => {
