@@ -14,6 +14,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { Request, Response } from 'express';
+import OpenAI from 'openai';
 import { getSessionConfig, handleFunctionCall, initializeMCP, shutdownMCP } from './agent.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -21,6 +22,11 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT: number = Number(process.env.PORT) || 3002;
+
+// OpenAI client for conversation summarization
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY
+});
 
 // Middleware
 app.use(express.json());
@@ -48,6 +54,119 @@ function saveParentUpdate(phoneNumber: string, update: string, category: string 
 
   fs.appendFileSync(logFile, JSON.stringify(logEntry) + '\n');
   console.log(`📝 Update saved for ${phoneNumber}: ${category}`);
+}
+
+/**
+ * Summarize conversation using GPT-4o-mini and save to JSONL
+ */
+async function summarizeAndSaveConversation(
+  transcript: Array<{speaker: string; text: string; timestamp: Date}>,
+  phoneNumber: string,
+  callDuration: number
+): Promise<void> {
+  if (transcript.length === 0) {
+    console.log('⚠️  No conversation to summarize (empty transcript)');
+    return;
+  }
+
+  try {
+    console.log('🧠 Summarizing conversation with GPT-4o-mini...');
+
+    // Format transcript for GPT
+    const formattedTranscript = transcript
+      .map(m => `${m.speaker.toUpperCase()}: ${m.text}`)
+      .join('\n');
+
+    // Ask GPT to summarize
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [{
+        role: 'user',
+        content: `Summarize this conversation between a parent and Abby (baby coach):
+
+${formattedTranscript}
+
+Extract and return as JSON:
+{
+  "summary": "2-3 sentence summary of the conversation",
+  "key_topics": ["topic1", "topic2"],
+  "concerns_raised": ["concern1", "concern2"],
+  "action_items": ["item1", "item2"],
+  "sentiment": "worried|positive|neutral"
+}
+
+Only include concerns and action items if they were actually mentioned.`
+      }],
+      response_format: { type: 'json_object' }
+    });
+
+    const summary = JSON.parse(response.choices[0].message.content || '{}');
+
+    // Save to JSONL
+    const conversationsDir = path.join(__dirname, '..', 'data', 'conversations');
+    if (!fs.existsSync(conversationsDir)) {
+      fs.mkdirSync(conversationsDir, { recursive: true });
+    }
+
+    const sanitizedNumber = phoneNumber.replace(/[^0-9]/g, '');
+    const conversationFile = path.join(conversationsDir, `${sanitizedNumber}.jsonl`);
+
+    const conversationEntry = {
+      timestamp: new Date().toISOString(),
+      phone: phoneNumber,
+      duration_seconds: callDuration,
+      ...summary
+    };
+
+    fs.appendFileSync(conversationFile, JSON.stringify(conversationEntry) + '\n');
+    console.log(`✅ Conversation summary saved for ${phoneNumber}`);
+    console.log(`   Topics: ${summary.key_topics?.join(', ') || 'none'}`);
+    console.log(`   Sentiment: ${summary.sentiment || 'unknown'}`);
+  } catch (error) {
+    console.error('❌ Failed to summarize conversation:', error);
+  }
+}
+
+/**
+ * Load last conversation summary (if within 48 hours)
+ */
+function getLastConversation(phoneNumber: string): any | null {
+  try {
+    const conversationsDir = path.join(__dirname, '..', 'data', 'conversations');
+    const sanitizedNumber = phoneNumber.replace(/[^0-9]/g, '');
+    const conversationFile = path.join(conversationsDir, `${sanitizedNumber}.jsonl`);
+
+    if (!fs.existsSync(conversationFile)) {
+      return null;
+    }
+
+    // Read all lines and get the last one
+    const lines = fs.readFileSync(conversationFile, 'utf-8').trim().split('\n');
+    if (lines.length === 0) {
+      return null;
+    }
+
+    const lastLine = lines[lines.length - 1];
+    const lastConvo = JSON.parse(lastLine);
+
+    // Calculate hours since last conversation
+    const lastTimestamp = new Date(lastConvo.timestamp);
+    const hoursSince = (Date.now() - lastTimestamp.getTime()) / 1000 / 3600;
+
+    // Only return if within 48 hours
+    if (hoursSince > 48) {
+      console.log(`⏰ Last conversation was ${hoursSince.toFixed(1)}h ago (too old)`);
+      return null;
+    }
+
+    return {
+      ...lastConvo,
+      hours_since: hoursSince
+    };
+  } catch (error) {
+    console.error('❌ Failed to load last conversation:', error);
+    return null;
+  }
 }
 
 /**
@@ -110,6 +229,8 @@ wss.on('connection', (twilioWs) => {
   let streamSid = null;
   let callSid = null;
   let phoneNumber = null;
+  let conversationTranscript: Array<{speaker: string; text: string; timestamp: Date}> = [];
+  let callStartTime: Date | null = null;
 
   // Connect to OpenAI Realtime API
   function connectToOpenAI() {
@@ -178,6 +299,45 @@ wss.on('connection', (twilioWs) => {
               // Continue without context - not critical
             }
 
+            // Load last conversation context (if within 48 hours)
+            try {
+              const lastConvo = getLastConversation(phoneNumber);
+
+              if (lastConvo) {
+                console.log(`💬 Loading last conversation context (${lastConvo.hours_since.toFixed(1)}h ago)`);
+
+                const contextText = [
+                  `Last conversation (${lastConvo.hours_since.toFixed(0)} hours ago):`,
+                  lastConvo.summary,
+                  '',
+                  `Topics discussed: ${lastConvo.key_topics?.join(', ') || 'none'}`,
+                  lastConvo.concerns_raised?.length > 0 ? `Concerns raised: ${lastConvo.concerns_raised.join(', ')}` : '',
+                  lastConvo.action_items?.length > 0 ? `Follow up on: ${lastConvo.action_items.join(', ')}` : '',
+                  '',
+                  'Reference this naturally in your greeting if relevant.'
+                ].filter(line => line !== '').join('\n');
+
+                openaiWs.send(JSON.stringify({
+                  type: 'conversation.item.create',
+                  item: {
+                    type: 'message',
+                    role: 'system',
+                    content: [{
+                      type: 'input_text',
+                      text: contextText
+                    }]
+                  }
+                }));
+
+                console.log('✅ Last conversation context loaded');
+              } else {
+                console.log('ℹ️  No recent conversation found (or >48h old)');
+              }
+            } catch (error) {
+              console.warn('⚠️  Failed to load last conversation context:', error);
+              // Continue without context - not critical
+            }
+
             // Request initial greeting from Abby (now that context is loaded)
             openaiWs.send(JSON.stringify({
               type: 'response.create'
@@ -225,6 +385,11 @@ wss.on('connection', (twilioWs) => {
 
           case 'conversation.item.input_audio_transcription.completed':
             console.log(`👤 USER: "${event.transcript}"`);
+            conversationTranscript.push({
+              speaker: 'user',
+              text: event.transcript,
+              timestamp: new Date()
+            });
             break;
 
           case 'response.audio_transcript.delta':
@@ -233,6 +398,11 @@ wss.on('connection', (twilioWs) => {
 
           case 'response.audio_transcript.done':
             console.log(`🤖 ABBY: "${event.transcript}"`);
+            conversationTranscript.push({
+              speaker: 'abby',
+              text: event.transcript,
+              timestamp: new Date()
+            });
             break;
 
           case 'input_audio_buffer.speech_started':
@@ -283,6 +453,7 @@ wss.on('connection', (twilioWs) => {
           streamSid = data.start.streamSid;
           callSid = data.start.callSid;
           phoneNumber = data.start.customParameters?.From || 'unknown';
+          callStartTime = new Date();
           console.log(`📞 Stream started: ${streamSid}`);
           console.log(`   Call SID: ${callSid}`);
           console.log(`   From: ${phoneNumber}`);
@@ -311,8 +482,15 @@ wss.on('connection', (twilioWs) => {
     }
   });
 
-  twilioWs.on('close', () => {
+  twilioWs.on('close', async () => {
     console.log('🔌 Twilio Media Stream disconnected');
+
+    // Summarize and save conversation
+    if (conversationTranscript.length > 0 && phoneNumber && callStartTime) {
+      const callDuration = Math.floor((Date.now() - callStartTime.getTime()) / 1000);
+      await summarizeAndSaveConversation(conversationTranscript, phoneNumber, callDuration);
+    }
+
     if (openaiWs) {
       openaiWs.close();
     }

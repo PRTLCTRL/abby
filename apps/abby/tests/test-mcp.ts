@@ -8,7 +8,7 @@
  */
 
 import 'dotenv/config';
-import { initializeMCP, shutdownMCP, handleFunctionCall } from './agent.js';
+import { initializeMCP, shutdownMCP, handleFunctionCall } from '../src/agent.js';
 
 interface TestResult {
   name: string;

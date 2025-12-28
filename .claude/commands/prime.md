@@ -1,3 +1,7 @@
+---
+description: Load comprehensive Abby project overview and architecture
+---
+
 # Prime - Abby Project Overview
 
 This skill provides a comprehensive overview of the Abby project architecture, helping Claude understand the entire system to assist with adding new features.
