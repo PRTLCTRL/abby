@@ -79,12 +79,9 @@ def init_huckleberry():
     logger.info(f"Using child: {child_name} (UID: {child_uid})")
 
 
-# Initialize Huckleberry on startup
-try:
-    init_huckleberry()
-except Exception as e:
-    logger.error(f"Failed to initialize Huckleberry: {e}")
-    sys.exit(1)
+# Don't initialize Huckleberry on startup - do it lazily on first tool call
+# This allows MCP server to start even if Huckleberry is temporarily unavailable
+logger.info("Huckleberry will be initialized on first tool call")
 
 # Create MCP server
 server = Server("huckleberry")
@@ -215,6 +212,19 @@ async def list_tools() -> list[Tool]:
 async def call_tool(name: str, arguments: Any) -> list[TextContent]:
     """Handle tool calls."""
     logger.info(f"Tool called: {name} with args: {arguments}")
+
+    # Lazy initialization of Huckleberry API
+    global huckleberry_api
+    if huckleberry_api is None:
+        try:
+            logger.info("Lazy-initializing Huckleberry API...")
+            init_huckleberry()
+        except Exception as e:
+            logger.error(f"Failed to initialize Huckleberry: {e}")
+            return [TextContent(
+                type="text",
+                text=f"ERROR: Unable to connect to Huckleberry API: {str(e)}"
+            )]
 
     try:
         if name == "log_sleep":

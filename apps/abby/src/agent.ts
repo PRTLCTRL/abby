@@ -36,7 +36,7 @@ export async function initializeMCP() {
 
   // Create transport (this spawns the Python MCP server)
   mcpTransport = new StdioClientTransport({
-    command: 'python',
+    command: 'python3',
     args: [mcpServerPath]
   });
 
