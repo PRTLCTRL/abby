@@ -7,59 +7,44 @@
  * Uses MCP to communicate with Huckleberry Python service.
  */
 
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import path from 'path';
-import { fileURLToPath } from 'url';
 import { buildFullSessionInstructions } from './prompts.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+// Huckleberry service HTTP client
+const HUCKLEBERRY_SERVICE_URL = process.env.HUCKLEBERRY_SERVICE_URL ||  'https://huckleberry-service-x3fjlzopga-uc.a.run.app';
 
-// MCP Client for Huckleberry
-let mcpClient: Client | null = null;
-let mcpTransport: StdioClientTransport | null = null;
+console.log(`🍓 Huckleberry service: ${HUCKLEBERRY_SERVICE_URL}`);
 
 /**
- * Initialize MCP client connection to Huckleberry Python server
+ * Call Huckleberry service via HTTP
  */
-export async function initializeMCP() {
-  if (mcpClient) {
-    console.log('🍓 MCP client already initialized');
-    return mcpClient;
-  }
+async function callHuckleberryService(endpoint: string, data: any): Promise<any> {
+  const url = `${HUCKLEBERRY_SERVICE_URL}${endpoint}`;
 
-  const mcpServerPath = path.resolve(__dirname, './mcp/huckleberry_server.py');
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(data)
+    });
 
-  console.log('🍓 Starting Huckleberry MCP server...');
-  console.log(`   Path: ${mcpServerPath}`);
-
-  // Create transport (this spawns the Python MCP server)
-  mcpTransport = new StdioClientTransport({
-    command: 'python3',
-    args: [mcpServerPath]
-  });
-
-  // Create client
-  mcpClient = new Client({
-    name: 'abby-client',
-    version: '1.0.0'
-  }, {
-    capabilities: {
-      tools: {}
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`HTTP ${response.status}: ${error}`);
     }
-  });
 
-  // Connect
-  await mcpClient.connect(mcpTransport);
+    return await response.json();
+  } catch (error) {
+    console.error(`❌ Failed to call ${endpoint}:`, error);
+    throw error;
+  }
+}
 
-  console.log('✅ MCP client connected to Huckleberry server');
-
-  // List available tools
-  const tools = await mcpClient.listTools();
-  console.log(`🛠️  Available MCP tools: ${tools.tools.map(t => t.name).join(', ')}`);
-
-  return mcpClient;
+// Deprecated MCP functions (no longer used)
+export async function initializeMCP() {
+  console.log('⚠️  MCP is deprecated, using HTTP service instead');
+  return null;
 }
 
 /**
@@ -199,6 +184,109 @@ export async function handleFunctionCall(
 ): Promise<{ success: boolean; message: string }> {
   console.log(`📞 Function call: ${functionName}`, args);
 
+  try {
+    switch (functionName) {
+      case 'logSleep':
+        console.log('🍓 Logging sleep via HTTP');
+        const sleepResult = await callHuckleberryService('/log-sleep', {
+          duration_minutes: args.duration_minutes,
+          notes: args.notes || ''
+        });
+        return {
+          success: true,
+          message: sleepResult.message || 'Sleep logged successfully'
+        };
+
+      case 'logFeeding':
+        console.log('🍓 Logging feeding via HTTP');
+        const feedingResult = await callHuckleberryService('/log-feeding', {
+          amount_oz: args.amount_oz,
+          feeding_type: args.feeding_type || 'bottle',
+          notes: args.notes || ''
+        });
+        return {
+          success: true,
+          message: feedingResult.message || 'Feeding logged successfully'
+        };
+
+      case 'logDiaper':
+        console.log('🍓 Logging diaper via HTTP');
+        const diaperResult = await callHuckleberryService('/log-diaper', {
+          diaper_type: args.diaper_type,
+          notes: args.notes || ''
+        });
+        return {
+          success: true,
+          message: diaperResult.message || 'Diaper logged successfully'
+        };
+
+      case 'logActivity':
+        console.log('🍓 Logging activity via HTTP');
+        const activityResult = await callHuckleberryService('/log-activity', {
+          activity: args.activity,
+          notes: args.notes || ''
+        });
+        return {
+          success: true,
+          message: activityResult.message || 'Activity logged successfully'
+        };
+
+      case 'getRecentActivity':
+        console.log('🍓 Getting recent activity via HTTP');
+        try {
+          const recentResult = await fetch(`${HUCKLEBERRY_SERVICE_URL}/recent-activity?hours=${args.hours || 24}`);
+          const data = await recentResult.json();
+          return {
+            success: true,
+            message: data.message || 'Retrieved recent activity'
+          };
+        } catch (error) {
+          console.error('❌ Failed to get recent activity:', error);
+          return {
+            success: false,
+            message: 'Could not retrieve recent activity'
+          };
+        }
+
+      case 'recordUpdate':
+        console.log('💬 Recording parent update');
+        if (saveUpdateFn && phoneNumber) {
+          saveUpdateFn(phoneNumber, args.update, args.category);
+          return {
+            success: true,
+            message: 'Update recorded'
+          };
+        }
+        return {
+          success: false,
+          message: 'Could not record update'
+        };
+
+      default:
+        return {
+          success: false,
+          message: `Unknown function: ${functionName}`
+        };
+    }
+  } catch (error: any) {
+    console.error(`❌ Function call failed: ${functionName}`,error);
+    return {
+      success: false,
+      message: error.message || 'Failed to complete action'
+    };
+  }
+}
+
+// OLD MCP CODE BELOW - DEPRECATED
+/*
+async function handleFunctionCallOldMCP(
+  functionName: string,
+  args: any,
+  phoneNumber: string | null = null,
+  saveUpdateFn: ((phone: string, update: string, category: string) => void) | null = null
+): Promise<{ success: boolean; message: string }> {
+  console.log(`📞 Function call: ${functionName}`, args);
+
   // Ensure MCP client is initialized
   if (!mcpClient) {
     try {
@@ -328,13 +416,9 @@ export function getSessionConfig() {
 }
 
 /**
- * Cleanup MCP client on shutdown
+ * Cleanup (no-op for HTTP client)
  */
 export async function shutdownMCP() {
-  if (mcpClient) {
-    console.log('🍓 Shutting down MCP client...');
-    await mcpClient.close();
-    mcpClient = null;
-    mcpTransport = null;
-  }
+  console.log('⚠️  MCP shutdown called (no-op for HTTP service)');
+  // No cleanup needed for HTTP client
 }
