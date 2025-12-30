@@ -1,0 +1,11 @@
+# MCP SDK for stdio server communication
+mcp>=1.0.0
+
+# HTTP requests for Huckleberry API
+requests>=2.31.0
+
+# Google Cloud Firestore for Huckleberry backend
+google-cloud-firestore>=2.14.0
+
+# Environment variables (fallback from Secret Manager)
+python-dotenv>=1.0.0

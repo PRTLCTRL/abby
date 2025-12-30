@@ -1,0 +1,41 @@
+# Dependencies
+node_modules
+npm-debug.log
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Data and logs (ephemeral in container)
+data/
+*.log
+
+# Build artifacts
+dist/
+
+# Version control
+.git
+.gitignore
+
+# Documentation
+README.md
+*.md
+
+# Tests
+tests/
+test/
+*.test.ts
+*.test.js
+
+# IDE and OS files
+.DS_Store
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# Development tools
+.prettierrc
+.eslintrc
