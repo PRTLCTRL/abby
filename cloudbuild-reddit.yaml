@@ -1,0 +1,12 @@
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - 'us-central1-docker.pkg.dev/abby-baby-coach/abby-repo/reddit-service:latest'
+      - '-f'
+      - 'apps/reddit-service/Dockerfile'
+      - '.'
+images:
+  - 'us-central1-docker.pkg.dev/abby-baby-coach/abby-repo/reddit-service:latest'
+timeout: 1200s
