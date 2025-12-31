@@ -212,7 +212,7 @@ export async function handleFunctionCall(
       case 'logDiaper':
         console.log('🍓 Logging diaper via HTTP');
         const diaperResult = await callHuckleberryService('/log-diaper', {
-          diaper_type: args.diaper_type,
+          diaper_type: args.mode,
           notes: args.notes || ''
         });
         return {

@@ -18,120 +18,257 @@ Abby is an AI-powered newborn baby coach accessible via phone that:
 
 ## System Architecture Overview
 
-### Three-Tier Architecture
+### Microservices Architecture (Cloud Run)
 
 ```
 Phone Call (Twilio)
     ↓
-Abby Server (Node.js/TypeScript)
-    ↓
-Huckleberry MCP Server (Python)
+Abby Service (Node.js) - Cloud Run
+    ↓ HTTP
+Huckleberry Service (Python FastAPI) - Cloud Run
     ↓
 Huckleberry API Backend
 ```
 
-### Component 1: Abby Server
+**Architecture Change (Dec 2024)**:
+- **Before**: Monolithic container (Node.js + Python + MCP via stdio)
+- **After**: Microservices (HTTP communication between services)
+- **Why**: Fixed MCP timeout issues, better scalability, easier debugging
+
+### Service 1: Abby Service
+**Deployed**: https://abby-service-1060085564812.us-central1.run.app
 **Location**: `apps/abby/`
 **Technology**: Node.js + TypeScript + Express + WebSocket
-**Port**: 3002
+**Container**: Node.js 20 (slim)
 
 **Responsibilities**:
 1. Handle incoming phone calls via Twilio webhook (`POST /incoming-call`)
 2. Manage WebSocket connection to Twilio Media Streams (audio in/out)
 3. Connect to OpenAI Realtime API for conversational AI
-4. Spawn and communicate with Huckleberry MCP server
-5. Handle AI function calls and route them to appropriate services
-6. Save general parent updates to local log files
+4. Handle AI function calls and route to Huckleberry service via HTTP
+5. Save general parent updates to ephemeral logs
 
 **Key Files**:
 - `src/server.ts` - HTTP server, WebSocket handler, Twilio integration
-- `src/agent.ts` - AI agent config, instructions, tools, MCP client
-- `src/test-mcp.ts` - Testing script for MCP connection
+- `src/agent.ts` - AI agent config, instructions, tools, HTTP client
+- `src/prompts.ts` - Modular prompt system
+- `Dockerfile` - Container definition (Node.js only, no Python)
 
-### Component 2: Huckleberry MCP Server
-**Location**: `apps/abby/src/mcp/huckleberry_server.py`
-**Technology**: Python + MCP SDK
-**Communication**: stdio (spawned as subprocess by Node.js)
+**Environment Variables**:
+- `OPENAI_API_KEY` - OpenAI API key (from Secret Manager)
+- `HUCKLEBERRY_SERVICE_URL` - Huckleberry service URL (defaults to deployed URL)
+- `PORT` - Server port (default: 8080 in Cloud Run)
+- `NODE_ENV` - Environment (production)
 
-**Responsibilities**:
-1. Provide MCP tools for baby activity tracking
-2. Authenticate with Huckleberry API
-3. Execute tool calls from Abby and return results
-4. Manage child profile (currently: Valya)
-
-**Available MCP Tools**:
-- `log_sleep(duration_minutes, notes)` - Log completed sleep sessions
-- `log_feeding(amount_oz, feeding_type, notes)` - Log feeding sessions
-- `log_diaper(diaper_type, notes)` - Log diaper changes (pee/poo/both/dry)
-- `log_activity(activity, notes)` - Log general activities (burp, bath, tummy time)
-- `log_growth(weight_lbs, height_in, head_in)` - Log growth measurements
-
-### Component 3: Huckleberry API Module
-**Location**: `specs/huckleberry_api/`
-**Technology**: Python
-**Files**: `api.py`, `types.py`, `const.py`
+### Service 2: Huckleberry Service
+**Deployed**: https://huckleberry-service-x3fjlzopga-uc.a.run.app
+**Location**: `apps/huckleberry-service/`
+**Technology**: Python 3.11 + FastAPI
+**Container**: Python 3.11 (slim)
 
 **Responsibilities**:
-- Authenticate with Huckleberry backend (email/password)
-- Provide Python interface for Huckleberry REST API
-- Handle token management and API requests
+1. Authenticate with Huckleberry API
+2. Provide REST endpoints for baby activity tracking
+3. Manage child profile (Valya)
+
+**API Endpoints**:
+- `POST /log-sleep` - Log completed sleep sessions
+- `POST /log-feeding` - Log feeding sessions
+- `POST /log-diaper` - Log diaper changes (pee/poo/both/dry)
+- `POST /log-activity` - Log general activities (burp, bath, tummy time)
+- `GET /health` - Health check
+
+**Environment Variables**:
+- `HUCKLE_USER_ID` - Huckleberry email (from Secret Manager)
+- `HUCKLE_PW` - Huckleberry password (from Secret Manager)
+- `PORT` - Server port (default: 8080)
+
+### Service 3: Reddit Service (Future)
+**Status**: Code ready, not yet deployed
+**Location**: `apps/reddit-service/`
+**Technology**: Python 3.11 + FastAPI + PRAW
+
+**Purpose**: Fetch parenting tips from Reddit subreddits (read-only)
 
 ## How It Works: Data Flow Example
 
 **Example**: Parent says "Baby just napped for 2 hours"
 
-1. **Twilio** receives call → forwards to webhook → establishes Media Stream WebSocket
-2. **Abby Server** receives audio → forwards to OpenAI Realtime API
+1. **Twilio** receives call → forwards to Abby webhook → establishes Media Stream WebSocket
+2. **Abby Service** receives audio → forwards to OpenAI Realtime API
 3. **OpenAI** transcribes and understands → calls function `logSleep(duration_minutes=120)`
-4. **Abby** receives function call → forwards to MCP client
-5. **MCP Client** calls `log_sleep` tool on Huckleberry MCP server (via stdio)
-6. **Huckleberry MCP Server** executes tool → calls `huckleberry_api.start_sleep()` and `complete_sleep()`
-7. **Huckleberry API** makes HTTP requests to Huckleberry backend
-8. **Response** bubbles back through chain → Abby responds: "Got it! I've logged that for you."
+4. **Abby** receives function call → makes HTTP POST to Huckleberry service
+5. **Huckleberry Service** executes → calls `huckleberry_api.start_sleep()` and `complete_sleep()`
+6. **Huckleberry API** makes HTTP requests to Huckleberry backend
+7. **Response** returns via HTTP → Abby responds: "Got it! I've logged that for you."
+
+## Cloud Run Deployment
+
+### Production Services
+
+| Service | URL | Status | Scaling |
+|---------|-----|--------|---------|
+| Abby | https://abby-service-1060085564812.us-central1.run.app | ✅ Live | 0-5 instances |
+| Huckleberry | https://huckleberry-service-x3fjlzopga-uc.a.run.app | ✅ Live | 0-3 instances |
+| Reddit | Not deployed | ⏳ Awaiting credentials | - |
+
+### GCP Project Details
+- **Project**: `abby-baby-coach`
+- **Region**: `us-central1` (Iowa)
+- **Artifact Registry**: `abby-repo`
+- **Service Accounts**:
+  - `abby-deployer` - For GitHub Actions CI/CD
+  - `abby-runtime` - Runtime service account for Cloud Run
+
+### Secret Manager
+Secrets stored in GCP Secret Manager:
+- `OPENAI_API_KEY` - OpenAI API key
+- `HUCKLE_USER_ID` - Huckleberry email
+- `HUCKLE_PW` - Huckleberry password
+- `REDDIT_CLIENT_ID` - Reddit API client ID (future)
+- `REDDIT_CLIENT_SECRET` - Reddit API secret (future)
+
+### Viewing Logs
+
+**View recent logs for a service**:
+```bash
+# Abby service logs
+gcloud run services logs read abby-service --region us-central1 --limit 50
+
+# Huckleberry service logs
+gcloud run services logs read huckleberry-service --region us-central1 --limit 50
+
+# Filter logs
+gcloud run services logs read abby-service --region us-central1 --limit 100 | grep ERROR
+
+# Real-time logs (tail)
+gcloud run services logs tail abby-service --region us-central1
+```
+
+**View logs in Cloud Console**:
+https://console.cloud.google.com/run?project=abby-baby-coach
+
+**View logs for specific revision**:
+```bash
+gcloud logging read "resource.type=cloud_run_revision AND resource.labels.service_name=abby-service AND resource.labels.revision_name=abby-service-00006-wjf" --limit=50 --project=abby-baby-coach
+```
+
+### Viewing Deployments
+
+**List service revisions**:
+```bash
+# List all revisions for Abby
+gcloud run revisions list --service=abby-service --region=us-central1
+
+# List all revisions for Huckleberry
+gcloud run revisions list --service=huckleberry-service --region=us-central1
+```
+
+**View current deployment**:
+```bash
+# Describe Abby service
+gcloud run services describe abby-service --region=us-central1
+
+# Get service URL
+gcloud run services describe abby-service --region=us-central1 --format="get(status.url)"
+
+# View current traffic split
+gcloud run services describe abby-service --region=us-central1 --format="get(status.traffic)"
+```
+
+**View recent builds**:
+```bash
+# List Cloud Build history
+gcloud builds list --limit=10
+
+# View specific build
+gcloud builds describe BUILD_ID
+
+# View build logs
+gcloud builds log BUILD_ID
+```
+
+### Deploying Updates
+
+**Manual deployment**:
+```bash
+# Build container
+gcloud builds submit --config=cloudbuild.yaml .
+
+# Deploy to Cloud Run
+gcloud run deploy abby-service \
+  --image us-central1-docker.pkg.dev/abby-baby-coach/abby-repo/abby-service:latest \
+  --region us-central1
+```
+
+**Automated deployment (GitHub Actions)**:
+- Push to `main` branch
+- GitHub Actions automatically builds and deploys
+- Workflow: `.github/workflows/deploy-abby.yml`
+
+### Testing Deployment
+
+```bash
+# Test Abby health
+curl https://abby-service-1060085564812.us-central1.run.app/health
+
+# Test Huckleberry health
+curl https://huckleberry-service-x3fjlzopga-uc.a.run.app/health
+
+# Test incoming call endpoint
+curl -X POST https://abby-service-1060085564812.us-central1.run.app/incoming-call \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "CallSid=test123&From=+15555551234&To=+15555556789&CallStatus=ringing"
+
+# Test Huckleberry logging
+curl -X POST https://huckleberry-service-x3fjlzopga-uc.a.run.app/log-sleep \
+  -H "Content-Type: application/json" \
+  -d '{"duration_minutes": 60, "notes": "Test sleep"}'
+```
+
+### Monitoring
+
+**Cloud Run Metrics**:
+https://console.cloud.google.com/run/detail/us-central1/abby-service/metrics?project=abby-baby-coach
+
+**Key Metrics**:
+- Request count
+- Request latency
+- Container instance count
+- Error rate
+- Memory usage
+- CPU utilization
+
+**Alerts** (to be configured):
+- Error rate > 5%
+- Response time > 5s
+- Service down
 
 ## Technology Stack
 
-### Abby Server (Node.js)
+### Abby Service (Node.js)
 - **express** - HTTP server
 - **ws** - WebSocket client/server
 - **twilio** - Twilio SDK
-- **@modelcontextprotocol/sdk** - MCP client
+- **openai** - OpenAI SDK
 - **dotenv** - Environment config
-- **tsx** - TypeScript execution (dev)
+- **tsx** - TypeScript execution
 - **typescript** - TypeScript compiler
 
-### Huckleberry MCP (Python)
-- **mcp** - MCP server SDK
+### Huckleberry Service (Python)
+- **fastapi** - Web framework
+- **uvicorn** - ASGI server
+- **pydantic** - Data validation
 - **requests** - HTTP client (used by Huckleberry API)
-- **python-dotenv** - Environment config
 
 ### External Services
 - **Twilio** - Phone service + Media Streams
 - **OpenAI Realtime API** - Conversational AI (gpt-4o-realtime-preview)
 - **Huckleberry** - Baby tracking backend
-- **ngrok** - Local tunneling (development only)
+- **Google Cloud Run** - Serverless container platform
+- **Google Secret Manager** - Credentials storage
 
-## Environment Configuration
-
-### Required Environment Variables (apps/abby/.env)
-```env
-# OpenAI
-OPENAI_API_KEY=sk-proj-...
-
-# Huckleberry
-HUCKLE_USER_ID=email@example.com
-HUCKLE_PW=password
-
-# Optional
-PORT=3002  # Default: 3002
-```
-
-### Files to NEVER Commit
-- `apps/abby/.env` - Contains secrets
-- `dev.vars` - Contains secrets (root level)
-- Both are in `.gitignore`
-
-## How to Run
+## Local Development
 
 ### Development (Local + ngrok)
 ```bash
@@ -145,11 +282,16 @@ npm start        # Terminal 1
 npm run ngrok    # Terminal 2
 ```
 
-### Testing
+### Testing Locally
 ```bash
 cd apps/abby
-npm test         # Test MCP connection
-curl http://localhost:3002/health  # Health check
+npm start
+
+# Health check
+curl http://localhost:3002/health
+
+# Test with ngrok URL
+# Update Twilio webhook to ngrok URL
 ```
 
 ### Configure Twilio
@@ -157,52 +299,57 @@ curl http://localhost:3002/health  # Health check
 2. Go to Twilio Console → Your Number
 3. Set webhook: `https://abc123.ngrok.io/incoming-call` (POST)
 
+**Production**: Update to `https://abby-service-1060085564812.us-central1.run.app/incoming-call`
+
 ## Project Structure
 
 ```
 abby/
-├── apps/abby/                   # Main application
-│   ├── src/
-│   │   ├── server.ts            # Express + WebSocket + Twilio
-│   │   ├── agent.ts             # OpenAI agent + MCP client
-│   │   ├── test-mcp.ts          # MCP testing
-│   │   └── mcp/
-│   │       └── huckleberry_server.py  # MCP server
-│   ├── data/logs/               # Call logs (gitignored)
-│   ├── .env                     # Secrets (gitignored)
-│   ├── package.json
-│   └── tsconfig.json
+├── apps/
+│   ├── abby/                        # Abby Service (Node.js)
+│   │   ├── src/
+│   │   │   ├── server.ts            # Express + WebSocket + Twilio
+│   │   │   ├── agent.ts             # OpenAI agent + HTTP client
+│   │   │   └── prompts.ts           # Modular prompts
+│   │   ├── Dockerfile               # Node.js 20 container
+│   │   ├── package.json
+│   │   └── tsconfig.json
+│   │
+│   ├── huckleberry-service/         # Huckleberry Service (Python)
+│   │   ├── main.py                  # FastAPI app
+│   │   ├── Dockerfile               # Python 3.11 container
+│   │   └── requirements.txt
+│   │
+│   └── reddit-service/              # Reddit Service (Python) - Future
+│       ├── main.py                  # FastAPI app
+│       ├── Dockerfile
+│       ├── requirements.txt
+│       └── REDDIT_SETUP.md
 │
-├── specs/                       # Documentation
-│   ├── ARCHITECTURE.md          # Detailed architecture
-│   ├── SETUP.md                 # Setup guide
-│   └── huckleberry_api/         # Huckleberry Python API
+├── specs/                           # Documentation + Huckleberry API
+│   ├── ARCHITECTURE.md
+│   ├── SETUP.md
+│   └── huckleberry_api/             # Huckleberry Python API
+│       ├── __init__.py
 │       ├── api.py
 │       ├── types.py
 │       └── const.py
 │
-├── .claude/skills/              # Claude skills
-│   └── prime.md                 # This file
+├── .github/workflows/
+│   └── deploy-abby.yml              # GitHub Actions CI/CD
 │
+├── cloudbuild.yaml                  # Abby build config
+├── cloudbuild-huckleberry.yaml      # Huckleberry build config
+├── cloudbuild-reddit.yaml           # Reddit build config
 ├── .gitignore
 └── README.md
 ```
-
-## Abby's Personality & Instructions
-
-Abby is configured in `src/agent.ts` → `AGENT_INSTRUCTIONS`:
-- Warm, friendly, and encouraging
-- Evidence-based newborn care advice
-- Concise (it's a phone call)
-- Automatically logs activities when mentioned
-- Reminds parents to consult pediatrician for medical concerns
-- Greets caller immediately: "Hi! This is Abby, your newborn baby coach..."
 
 ## Adding New Features
 
 ### To Add a New Tool/Function
 
-1. **Add tool definition** in `src/agent.ts` → `TOOLS` array:
+1. **Add tool definition** in `apps/abby/src/agent.ts` → `TOOLS` array:
    ```typescript
    {
      name: 'myNewTool',
@@ -211,104 +358,78 @@ Abby is configured in `src/agent.ts` → `AGENT_INSTRUCTIONS`:
    }
    ```
 
-2. **Add handler** in `src/agent.ts` → `handleFunctionCall()`:
+2. **Add handler** in `apps/abby/src/agent.ts` → `handleFunctionCall()`:
    ```typescript
    case 'myNewTool':
-     // Handle the function call
+     const result = await callHuckleberryService('/my-endpoint', {
+       param: args.param
+     });
+     return { success: true, message: result.message };
    ```
 
-3. **If calling Huckleberry**, add MCP tool in `src/mcp/huckleberry_server.py`:
-   - Add to `list_tools()` decorator
-   - Add handler in `call_tool()` decorator
+3. **Add endpoint to Huckleberry service** in `apps/huckleberry-service/main.py`:
+   ```python
+   @app.post("/my-endpoint")
+   async def my_endpoint(request: MyRequest):
+       # Implementation
+       return {"success": True, "message": "Done"}
+   ```
 
-4. **If new Huckleberry API needed**, update `specs/huckleberry_api/api.py`
+4. **Deploy both services** to update production
 
 ### To Modify Abby's Behavior
 
-Edit `src/agent.ts`:
-- **Personality**: `AGENT_INSTRUCTIONS` string
+Edit `apps/abby/src/agent.ts` or `apps/abby/src/prompts.ts`:
+- **Personality**: Prompts in `buildFullSessionInstructions()`
 - **Voice**: `SESSION_CONFIG.voice` (alloy, echo, fable, onyx, nova, shimmer)
 - **Response settings**: `SESSION_CONFIG` (VAD threshold, silence duration, etc.)
 
-### To Add Logging/Tracking
+## Troubleshooting
 
-Options:
-1. **Local file logs**: Use `saveParentUpdate()` in `server.ts`
-2. **Huckleberry tracking**: Add MCP tool (for baby activities)
-3. **Database**: Implement new storage layer (future)
-
-## Common Development Tasks
-
-### Restart After Code Changes
+### Service Won't Start
 ```bash
-# Ctrl+C to stop
-npm start  # Restart
+# Check logs
+gcloud run services logs read SERVICE_NAME --region us-central1 --limit 50
+
+# Check service health
+curl https://SERVICE_URL/health
+
+# View container startup logs
+gcloud logging read "resource.type=cloud_run_revision AND resource.labels.service_name=SERVICE_NAME" --limit=30
 ```
 
-### View Logs
-- **Server logs**: Terminal running `npm start`
-- **MCP logs**: stderr (same terminal)
-- **Call logs**: `apps/abby/data/logs/{phoneNumber}.jsonl`
+### HTTP 422 Errors (Validation)
+- Check request body matches expected schema
+- View Huckleberry logs for detailed error messages
+- Common issue: Missing required fields in API calls
 
-### Debug MCP Connection
-```bash
-npm test  # Runs test-mcp.ts
-```
-
-### Update Dependencies
-```bash
-npm install <package>      # Node.js
-pip install <package>      # Python
-```
-
-## Deployment Considerations
-
-**Current**: Development only (localhost + ngrok)
-
-**Production TODO**:
-1. Deploy to cloud (AWS Lambda, Railway, Fly.io, Google Cloud Run)
-2. Replace ngrok with cloud URL
-3. Use secret manager for environment variables (not .env files)
-4. Set up monitoring and logging
-5. Implement session management for multiple concurrent calls
-6. Consider deploying Huckleberry MCP as separate service
-
-## Key Insights for Claude
-
-When helping with Abby:
-
-1. **Architecture is modular**: Abby server → MCP → Huckleberry API
-2. **Two languages**: TypeScript (Abby) + Python (MCP + Huckleberry API)
-3. **MCP is the bridge**: Node.js ↔ Python communication via stdio
-4. **OpenAI function calling**: AI decides when to call tools based on conversation
-5. **Real-time audio**: G.711 μ-law format, no transcription latency
-6. **Baby name is Valya**: Hard-coded in Huckleberry MCP (first child in account)
-
-## Documentation Files
-
-For deeper understanding, read:
-- `specs/ARCHITECTURE.md` - Complete technical architecture
-- `specs/SETUP.md` - Detailed setup and troubleshooting
-- `apps/abby/README.md` - Quick start guide
-- GitHub: https://github.com/PRTLCTRL/abby
+### MCP References (Deprecated)
+- Old MCP code is commented out but not deleted
+- All stdio communication replaced with HTTP
+- `initializeMCP()` and `shutdownMCP()` are now no-ops
 
 ## Quick Reference Commands
 
 ```bash
-# Start everything
-cd apps/abby && npm run start:with-ngrok
+# View live logs
+gcloud run services logs tail abby-service --region us-central1
 
-# Start server only
-cd apps/abby && npm start
+# Test services
+curl https://abby-service-1060085564812.us-central1.run.app/health
+curl https://huckleberry-service-x3fjlzopga-uc.a.run.app/health
 
-# Test MCP
-cd apps/abby && npm test
+# Deploy manually
+gcloud builds submit --config=cloudbuild.yaml .
+gcloud run deploy abby-service --image IMAGE_URL --region us-central1
 
-# Health check
-curl http://localhost:3002/health
+# List deployments
+gcloud run revisions list --service=abby-service --region=us-central1
 
-# View logs
-tail -f apps/abby/data/logs/*.jsonl
+# View secrets
+gcloud secrets list --project=abby-baby-coach
+
+# View Cloud Run services
+gcloud run services list --region=us-central1
 ```
 
 ---

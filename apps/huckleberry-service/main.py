@@ -164,7 +164,7 @@ async def log_diaper(request: LogDiaperRequest):
         logger.info(f"Logging diaper: {request.diaper_type}")
         huckleberry_api.log_diaper(
             child_uid=child_uid,
-            diaper_type=request.diaper_type,
+            mode=request.diaper_type,
             notes=request.notes
         )
         return {
